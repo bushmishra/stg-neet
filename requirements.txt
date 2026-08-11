@@ -1,6 +1,8 @@
 streamlit
-stmol
-py3Dmol
-rdkit
-requests
-ipython_genutils
+streamlit-webrtc
+opencv-python-headless
+deepface
+tf-keras
+numpy
+scipy
+pillow

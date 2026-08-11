@@ -1,323 +1,265 @@
 import streamlit as st
-import streamlit.components.v1 as components
-import random
+import cv2
+import numpy as np
+import datetime
+import sqlite3
+import pandas as pd
+from scipy.signal import find_peaks
+from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
+from deepface import DeepFace
 
-# 1. Page Configuration (Responsive Viewport)
+# ---------------------------------------------------------
+# 1. PAGE CONFIG & CUSTOM CSS
+# ---------------------------------------------------------
 st.set_page_config(
-    page_title="NEET 3D | IIT Madras BS",
-    page_icon="🧬",
+    page_title="VitalTrack AI | IITM BS",
+    page_icon="🌸",
     layout="wide",
-    initial_sidebar_state="collapsed"  # Auto-collapse sidebar on mobile screens
+    initial_sidebar_state="expanded"
 )
 
-# 2. Custom Mobile-Optimized CSS
 st.markdown("""
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <style>
-    /* Global Background */
-    .stApp {
-        background-color: #090d16;
-        color: #f8fafc;
-    }
-    
-    /* Responsive Header Card */
+    .stApp { background-color: #0d1117; color: #f0f6fc; }
     .main-header {
-        background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #312e81 100%);
-        padding: 16px;
-        border-radius: 12px;
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        box-shadow: 0 8px 20px -5px rgba(0, 0, 0, 0.5);
-        margin-bottom: 15px;
+        background: linear-gradient(135deg, #4c1d95 0%, #7c3aed 50%, #db2777 100%);
+        padding: 20px; border-radius: 16px; color: white; margin-bottom: 20px;
     }
-    
-    .header-title {
-        font-size: 1.5rem;
-        font-weight: 700;
-        color: #ffffff;
-        margin: 0;
-    }
-    
-    @media (min-width: 768px) {
-        .header-title {
-            font-size: 2.2rem;
-        }
-        .main-header {
-            padding: 24px;
-        }
-    }
-    
-    /* Responsive Quote Box */
-    .quote-card {
-        background: rgba(30, 41, 59, 0.7);
-        border-left: 4px solid #6366f1;
-        padding: 10px 14px;
-        margin: 10px 0 20px 0;
-        border-radius: 0 10px 10px 0;
-        font-size: 0.9rem;
-        font-style: italic;
-    }
-    
-    .badge {
-        background-color: #f59e0b;
-        color: #000;
-        padding: 2px 8px;
-        border-radius: 12px;
-        font-weight: bold;
-        font-size: 0.8rem;
-    }
-    
-    /* Touch canvas optimization */
-    canvas {
-        touch-action: none;
-    }
+    .badge { background-color: #f59e0b; color: #000; padding: 4px 12px; border-radius: 20px; font-weight: bold; }
+    .metric-card { background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(255, 255, 255, 0.1); padding: 16px; border-radius: 12px; text-align: center; }
     </style>
 """, unsafe_allow_html=True)
 
-# 3. Dynamic Motivational Quotes
-quotes = [
-    "“NCERT is your bible, consistency is your key. Every chapter brings you closer to your white coat!”",
-    "“The future belongs to those who believe in the beauty of their dreams.” — Eleanor Roosevelt",
-    "“Success isn't about greatness. It's about consistency.” — Dwayne Johnson",
-    "“Future Doctor, keep pushing! Your apron is waiting for you at your dream medical college.”"
-]
-selected_quote = random.choice(quotes)
+# ---------------------------------------------------------
+# 2. SQLITE DATABASE SETUP
+# ---------------------------------------------------------
+def init_db():
+    conn = sqlite3.connect("vitaltrack.db")
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS cycle_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_name TEXT,
+            log_date DATE,
+            flow_intensity TEXT,
+            cramp_intensity TEXT,
+            symptoms TEXT,
+            water_intake REAL
+        )
+    """)
+    conn.commit()
+    conn.close()
 
-# Header Layout (Flex stack on mobile, multi-column on desktop)
-col_logo, col_title = st.columns([1, 5])
+def save_log(user_name, log_date, flow, cramps, symptoms_str, water):
+    conn = sqlite3.connect("vitaltrack.db")
+    c = conn.cursor()
+    c.execute("""
+        INSERT INTO cycle_logs (user_name, log_date, flow_intensity, cramp_intensity, symptoms, water_intake)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (user_name, log_date, flow, cramps, symptoms_str, water))
+    conn.commit()
+    conn.close()
+
+def load_logs():
+    conn = sqlite3.connect("vitaltrack.db")
+    df = pd.read_sql_query("SELECT * FROM cycle_logs ORDER BY log_date DESC", conn)
+    conn.close()
+    return df
+
+init_db()
+
+# ---------------------------------------------------------
+# 3. HEADER & NAVIGATION
+# ---------------------------------------------------------
+col_logo, col_title = st.columns([1, 6])
 with col_logo:
-    st.image("https://upload.wikimedia.org/wikipedia/en/6/69/IIT_Madras_Logo.svg", width=90)
+    st.image("https://upload.wikimedia.org/wikipedia/en/6/69/IIT_Madras_Logo.svg", width=100)
 with col_title:
     st.markdown("""
         <div class="main-header">
-            <h1 class="header-title">🧬 NEET 3D Learning Platform</h1>
-            <p style="margin:4px 0 0 0; color: #cbd5e1; font-size: 0.85rem;">
-                Created by <span class="badge">Sudhanshu Mishra</span> | <b>IITM BS (Diploma Level)</b>
+            <h1 style="margin:0; font-size: 2rem;">🌸 VitalTrack AI: Vision, PPG & Cycle Health</h1>
+            <p style="margin:5px 0 0 0;">
+                Designed & Developed by <span class="badge">Sudhanshu Mishra</span> | <b>IIT Madras BS (Diploma Level)</b>
             </p>
         </div>
     """, unsafe_allow_html=True)
 
-# Motivational Quote Box
-st.markdown(f'<div class="quote-card">💡 <b>Daily Motivation:</b> {selected_quote}</div>', unsafe_allow_html=True)
-
-# Sidebar Navigation
-st.sidebar.title("📌 Subject Menu")
-subject = st.sidebar.radio("Select Subject:", [
-    "🧬 Biology (Class 11 & 12 NCERT)",
-    "🧪 Chemistry (3D Resonance)",
-    "⚡ Physics (3D Mechanics)",
-    "💬 Live Peer Q&A Board"
+st.sidebar.title("📌 Navigation")
+module = st.sidebar.radio("Select Module:", [
+    "❤️ Real PPG Optical Heart Rate Monitor",
+    "📷 Real OpenCV & DeepFace Emotion Detector",
+    "🌸 Menstrual & Ovulation Predictor",
+    "📊 Persistent Health & Symptom Log (SQLite)"
 ])
 
-st.sidebar.divider()
-
 # ---------------------------------------------------------
-# 1. BIOLOGY MODULE (Touch Enabled)
+# MODULE 1: REAL PPG OPTICAL HEART RATE MONITOR
 # ---------------------------------------------------------
-if subject == "🧬 Biology (Class 11 & 12 NCERT)":
-    st.subheader("🧬 Class 11 & 12 NCERT Biology 3D Explorer")
+if module == "❤️ Real PPG Optical Heart Rate Monitor":
+    st.header("❤️ Real Optical PPG Heart Rate Processing")
+    st.write("Place your index finger **lightly over your camera lens** (with flash/lighting enabled if possible). The algorithm processes green channel mean intensity changes frame-by-frame to extract blood pulse peaks.")
 
-    chapter = st.selectbox(
-        "Select NCERT Chapter:",
-        [
-            "Class 12 Ch 6: DNA Double Helix (Molecular Genetics)",
-            "Class 11 Ch 8: Fluid Mosaic Cell Membrane (Cell Biology)",
-            "Class 11 Ch 17: Hemoglobin & O2 Transport (Human Physiology)",
-            "Class 11 Ch 9: Insulin & Protein Folding (Biomolecules)",
-            "Class 12 Ch 11: EcoRI Restriction Enzyme (Biotechnology)"
-        ]
+    class PPGTransformer(VideoTransformerBase):
+        def __init__(self):
+            self.green_means = []
+            self.bpm = 0.0
+            self.fps = 30  # Standard frame sampling frequency
+
+        def transform(self, frame):
+            img = frame.to_ndarray(format="bgr24")
+            
+            # Extract green channel intensity across the center region
+            h, w, _ = img.shape
+            roi = img[int(h*0.3):int(h*0.7), int(w*0.3):int(w*0.7)]
+            mean_green = np.mean(roi[:, :, 1])
+            
+            self.green_means.append(mean_green)
+            
+            # Keep a rolling buffer of 150 frames (~5 seconds at 30 FPS)
+            if len(self.green_means) > 150:
+                self.green_means.pop(0)
+
+            # Signal processing when buffer is ready
+            if len(self.green_means) >= 90:
+                signal = np.array(self.green_means)
+                
+                # Detrend and normalize signal
+                signal = signal - np.mean(signal)
+                
+                # Peak detection with distance corresponding to 40-180 BPM range
+                min_distance = int(self.fps * 60 / 180)  # ~10 frames
+                peaks, _ = find_peaks(signal, distance=min_distance, prominence=0.5)
+
+                if len(peaks) > 1:
+                    peak_intervals = np.diff(peaks) / self.fps
+                    avg_interval = np.mean(peak_intervals)
+                    if avg_interval > 0:
+                        calculated_bpm = 60.0 / avg_interval
+                        if 40 <= calculated_bpm <= 180:
+                            self.bpm = round(calculated_bpm, 1)
+
+            # Overlay real-time BPM text on the video stream
+            display_text = f"BPM: {self.bpm if self.bpm > 0 else 'Calculating...'}"
+            cv2.putText(img, display_text, (30, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3)
+            
+            return img
+
+    webrtc_streamer(
+        key="ppg-heartrate",
+        video_transformer_factory=PPGTransformer,
+        rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
     )
 
-    render_style = st.selectbox("3D Rendering Style:", ["Cartoon Ribbon + Labels", "Surface Envelope (VDW)", "Ball & Stick Spheres"])
-
-    bio_database = {
-        "Class 12 Ch 6: DNA Double Helix (Molecular Genetics)": {
-            "pdb": "1bna",
-            "info": "<b>NCERT Concepts:</b> B-DNA double helix showing sugar-phosphate backbones and complementary hydrogen base pairs (A=T, G≡C).",
-            "label": "G≡C Base Pair Region"
-        },
-        "Class 11 Ch 8: Fluid Mosaic Cell Membrane (Cell Biology)": {
-            "pdb": "1afo",
-            "info": "<b>NCERT Concepts:</b> Transmembrane helices spanning hydrophobic core of the lipid bilayer.",
-            "label": "Transmembrane Helix"
-        },
-        "Class 11 Ch 17: Hemoglobin & O2 Transport (Human Physiology)": {
-            "pdb": "1a3n",
-            "info": "<b>NCERT Concepts:</b> Quaternary structure containing 2 Alpha and 2 Beta chains with oxygen-binding Heme groups.",
-            "label": "Oxygen Binding Site"
-        },
-        "Class 11 Ch 9: Insulin & Protein Folding (Biomolecules)": {
-            "pdb": "1trz",
-            "info": "<b>NCERT Concepts:</b> Peptide hormone composed of A-chain and B-chain connected by disulfide bonds.",
-            "label": "Disulfide Linkage Region"
-        },
-        "Class 12 Ch 11: EcoRI Restriction Enzyme (Biotechnology)": {
-            "pdb": "1b88",
-            "info": "<b>NCERT Concepts:</b> Restriction endonuclease cutting DNA at palindromic sequences (5'-GAATTC-3').",
-            "label": "Active Cleavage Site"
-        }
-    }
-
-    selected_bio = bio_database[chapter]
-    st.markdown(selected_bio["info"], unsafe_allow_html=True)
-
-    style_js = "viewer.setStyle({}, {cartoon: {color: 'spectrum'}});"
-    if render_style == "Surface Envelope (VDW)":
-        style_js = "viewer.setStyle({}, {cartoon: {color: 'spectrum'}}); viewer.addSurface(py3Dmol.VDW, {opacity: 0.5, color: 'white'});"
-    elif render_style == "Ball & Stick Spheres":
-        style_js = "viewer.setStyle({}, {stick: {}, sphere: {scale: 0.3}});"
-
-    # Mobile-Responsive HTML Wrapper
-    html_code = f"""
-    <script src="https://3Dmol.org/build/3Dmol-min.js"></script>
-    <div id="bio_canvas" style="width: 100%; height: 60vh; max-height: 480px; border: 2px solid #312e81; border-radius: 12px; background-color: #0f172a; touch-action: none;"></div>
-    <script>
-        let viewer = $3Dmol.createViewer(document.getElementById('bio_canvas'), {{backgroundColor: '#0f172a'}});
-        $3Dmol.download('pdb:{selected_bio["pdb"]}', viewer, {{}}, function() {{
-            {style_js}
-            viewer.addLabel('{selected_bio["label"]}', {{
-                fontSize: 12, fontColor: 'white', backgroundColor: '#dc2626', backgroundOpacity: 0.9, inFront: true
-            }}, {{x: 0, y: 0, z: 0}});
-            viewer.spin("y", 0.5);
-            viewer.render();
-            viewer.zoomTo();
-        }});
-    </script>
-    """
-    components.html(html_code, height=500)
+    st.info("🔬 **Engineering Mechanism:** Photoplethysmography measures light absorption variations caused by blood volume changes during cardiac cycles. Peak distances ($\Delta t$) determine pulse frequency ($60 / \Delta t$).")
 
 # ---------------------------------------------------------
-# 2. CHEMISTRY MODULE (Touch Enabled)
+# MODULE 2: REAL OPENCV + DEEPFACE EMOTION DETECTOR
 # ---------------------------------------------------------
-elif subject == "🧪 Chemistry (3D Resonance)":
-    st.subheader("🧪 Organic Chemistry 3D Resonance Explorer")
+elif module == "📷 Real OpenCV & DeepFace Emotion Detector":
+    st.header("📷 Real-Time Deep Face Emotion Recognition")
+    st.write("Click **Start** below to stream your camera feed. DeepFace processes real facial geometry to classify expressions.")
 
-    chem_choice = st.selectbox(
-        "Select Molecule / Ion:",
-        [
-            "Benzene (Aromatic Ring π-Cloud Delocalization)",
-            "Aniline (+R / +M Resonance Effect)",
-            "Phenol (Acidity & Phenoxide Stabilization)",
-            "Glucose (Haworth Projection Ring Conformers)"
-        ]
+    class EmotionTransformer(VideoTransformerBase):
+        def __init__(self):
+            self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+
+        def transform(self, frame):
+            img = frame.to_ndarray(format="bgr24")
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            faces = self.face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+
+            for (x, y, w, h) in faces:
+                face_roi = img[y:y+h, x:x+w]
+                try:
+                    analysis = DeepFace.analyze(face_roi, actions=['emotion'], enforce_detection=False)
+                    dominant_emotion = analysis[0]['dominant_emotion']
+
+                    cv2.rectangle(img, (x, y), (x+w, y+h), (0, 255, 0), 2)
+                    cv2.putText(img, f"Mood: {dominant_emotion.capitalize()}", (x, y - 10),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+                except Exception:
+                    pass
+
+            return img
+
+    webrtc_streamer(
+        key="emotion-detection",
+        video_transformer_factory=EmotionTransformer,
+        rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
     )
 
-    chem_database = {
-        "Benzene (Aromatic Ring π-Cloud Delocalization)": {
-            "cid": 241,
-            "desc": "<b>Resonance Concept:</b> Complete delocalization of 6 π-electrons creating equal bond lengths (139 pm).",
-            "label": "Planar Aromatic Ring"
-        },
-        "Aniline (+R / +M Resonance Effect)": {
-            "cid": 6800,
-            "desc": "<b>Resonance Concept:</b> Lone pair on Nitrogen delocalizes into the ring, activating Ortho/Para positions.",
-            "label": "-NH2 Group"
-        },
-        "Phenol (Acidity & Phenoxide Stabilization)": {
-            "cid": 996,
-            "desc": "<b>Resonance Concept:</b> Oxygen lone pair delocalization stabilizes the phenoxide ion.",
-            "label": "-OH Group"
-        },
-        "Glucose (Haworth Projection Ring Conformers)": {
-            "cid": 5793,
-            "desc": "<b>Biomolecules Concept:</b> Pyranose ring cyclic structure of D-glucose.",
-            "label": "Pyranose Ring Core"
-        }
-    }
+# ---------------------------------------------------------
+# MODULE 3: MENSTRUAL & OVULATION PREDICTOR
+# ---------------------------------------------------------
+elif module == "🌸 Menstrual & Ovulation Predictor":
+    st.header("🌸 Algorithmic Cycle & Ovulation Predictor")
 
-    selected_chem = chem_database[chem_choice]
-    st.markdown(selected_chem["desc"], unsafe_allow_html=True)
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        last_period = st.date_input("Start Date of Last Period:", datetime.date.today() - datetime.timedelta(days=14))
+    with c2:
+        cycle_length = st.number_input("Average Cycle Length (Days):", min_value=20, max_value=45, value=28)
+    with c3:
+        period_duration = st.number_input("Period Duration (Days):", min_value=2, max_value=10, value=5)
 
-    html_code = f"""
-    <script src="https://3Dmol.org/build/3Dmol-min.js"></script>
-    <div id="chem_canvas" style="width: 100%; height: 60vh; max-height: 480px; border: 2px solid #312e81; border-radius: 12px; background-color: #0b0f19; touch-action: none;"></div>
-    <script>
-        let viewer = $3Dmol.createViewer(document.getElementById('chem_canvas'), {{backgroundColor: '#0b0f19'}});
-        $3Dmol.download('cid:{selected_chem["cid"]}', viewer, {{}}, function() {{
-            viewer.setStyle({{}}, {{stick: {{colorscheme: 'Jmol'}}, sphere: {{scale: 0.35}}}});
-            let atoms = viewer.getAtoms({{}});
-            if (atoms.length > 0) {{
-                viewer.addLabel('{selected_chem["label"]}', {{
-                    fontSize: 12, fontColor: 'black', backgroundColor: '#f59e0b', backgroundOpacity: 0.95, inFront: true
-                }}, {{x: atoms[0].x, y: atoms[0].y, z: atoms[0].z}});
-            }}
-            viewer.spin("y", 0.8);
-            viewer.render();
-            viewer.zoomTo();
-        }});
-    </script>
-    """
-    components.html(html_code, height=500)
+    next_period = last_period + datetime.timedelta(days=cycle_length)
+    ovulation_day = next_period - datetime.timedelta(days=14)
+    fertile_start = ovulation_day - datetime.timedelta(days=5)
+    fertile_end = ovulation_day + datetime.timedelta(days=1)
+
+    st.markdown("---")
+    m1, m2, m3 = st.columns(3)
+    with m1:
+        st.markdown(f"""
+            <div class="metric-card">
+                <h4 style="color: #f472b6; margin:0;">Next Period Starts</h4>
+                <h2 style="margin:5px 0;">{next_period.strftime('%d %b %Y')}</h2>
+                <p style="color:#94a3b8; margin:0;">({(next_period - datetime.date.today()).days} days remaining)</p>
+            </div>
+        """, unsafe_allow_html=True)
+    with m2:
+        st.markdown(f"""
+            <div class="metric-card">
+                <h4 style="color: #fbbf24; margin:0;">Estimated Ovulation Day</h4>
+                <h2 style="margin:5px 0;">{ovulation_day.strftime('%d %b %Y')}</h2>
+                <p style="color:#94a3b8; margin:0;">Peak Conception Date</p>
+            </div>
+        """, unsafe_allow_html=True)
+    with m3:
+        st.markdown(f"""
+            <div class="metric-card">
+                <h4 style="color: #34d399; margin:0;">Fertile Window</h4>
+                <h3 style="margin:5px 0;">{fertile_start.strftime('%d %b')} - {fertile_end.strftime('%d %b')}</h3>
+                <p style="color:#94a3b8; margin:0;">6-Day High-Fertility Range</p>
+            </div>
+        """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 3. PHYSICS MODULE (Touch & Motion Enabled)
+# MODULE 4: PERSISTENT SQLITE SYMPTOM LOG
 # ---------------------------------------------------------
-elif subject == "⚡ Physics (3D Mechanics)":
-    st.subheader("⚡ Physics: 3D Vector Mechanics")
-    st.write("Adjust coordinate sliders below to observe real-time spatial vector resultant shifts.")
+elif module == "📊 Persistent Health & Symptom Log (SQLite)":
+    st.header("📊 Persistent Cycle & Symptom Logger (SQLite Database)")
 
-    v_x = st.slider("Vector X-Component (i)", -10.0, 10.0, 6.0)
-    v_y = st.slider("Vector Y-Component (j)", -10.0, 10.0, 8.0)
-    v_z = st.slider("Vector Z-Component (k)", -10.0, 10.0, 4.0)
+    with st.form("symptom_form", clear_on_submit=True):
+        user_name = st.text_input("User ID / Name:", value="User_1")
+        log_date = st.date_input("Date:", datetime.date.today())
+        flow = st.select_slider("Flow Intensity:", options=["None", "Spotting", "Light", "Medium", "Heavy"])
+        cramps = st.select_slider("Cramp Intensity:", options=["None", "Mild", "Moderate", "Severe"])
+        symptoms = st.multiselect("Logged Symptoms:", ["Headache", "Bloating", "Acne", "Mood Swings", "Fatigue", "Cravings"])
+        water_intake = st.slider("Water Intake (Liters):", 0.0, 5.0, 2.0, 0.5)
 
-    html_code = f"""
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <div id="phys_canvas" style="width: 100%; height: 50vh; max-height: 450px; border: 2px solid #312e81; border-radius: 12px; touch-action: none;"></div>
-    <script>
-        const container = document.getElementById('phys_canvas');
-        const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x0b0f19);
+        submitted = st.form_submit_button("Save Log Entry to SQLite")
 
-        const camera = new THREE.PerspectiveCamera(75, container.clientWidth/container.clientHeight, 0.1, 1000);
-        const renderer = new THREE.WebGLRenderer({{antialias: true}});
-        renderer.setSize(container.clientWidth, container.clientHeight);
-        container.appendChild(renderer.domElement);
+        if submitted:
+            symptoms_str = ", ".join(symptoms) if symptoms else "None"
+            save_log(user_name, log_date, flow, cramps, symptoms_str, water_intake)
+            st.success("Record permanently saved to SQLite database `vitaltrack.db`!")
 
-        const gridHelper = new THREE.GridHelper(20, 20, 0x6366f1, 0x1e293b);
-        scene.add(gridHelper);
-        const axesHelper = new THREE.AxesHelper(10);
-        scene.add(axesHelper);
-
-        const dir = new THREE.Vector3({v_x}, {v_y}, {v_z}).normalize();
-        const origin = new THREE.Vector3(0, 0, 0);
-        const length = Math.sqrt({v_x}*{v_x} + {v_y}*{v_y} + {v_z}*{v_z});
-        const arrowHelper = new THREE.ArrowHelper(dir, origin, length, 0x38bdf8, 1.5, 0.8);
-        scene.add(arrowHelper);
-
-        camera.position.set(12, 12, 12);
-        camera.lookAt(0, 0, 0);
-
-        function animate() {{
-            requestAnimationFrame(animate);
-            scene.rotation.y += 0.005;
-            renderer.render(scene, camera);
-        }}
-        animate();
-    </script>
-    """
-    components.html(html_code, height=470)
-
-# ---------------------------------------------------------
-# 4. LIVE DISCUSSION BOARD
-# ---------------------------------------------------------
-elif subject == "💬 Live Peer Q&A Board":
-    st.subheader("💬 Live Peer Q&A & Discussion Board")
-
-    if "messages" not in st.session_state:
-        st.session_state.messages = [
-            {"name": "Sudhanshu Mishra (Admin)", "text": "Welcome to the NEET 3D discussion room! Ask any questions regarding Biology models or Organic Chemistry resonance mechanisms here."},
-            {"name": "Ananya", "text": "Can someone explain why the G≡C base pair in DNA has 3 hydrogen bonds while A=T has only 2?"}
-        ]
-
-    for msg in st.session_state.messages:
-        with st.chat_message("user" if "Admin" not in msg["name"] else "assistant"):
-            st.markdown(f"**{msg['name']}**: {msg['text']}")
-
-    with st.form("chat_form", clear_on_submit=True):
-        user_name = st.text_input("Your Name / Student ID:", placeholder="e.g. Rahul S.")
-        user_msg = st.text_area("Your Question or Note:", placeholder="Type your discussion post here...")
-        submitted = st.form_submit_button("Post Question")
-
-        if submitted and user_msg.strip():
-            display_name = user_name.strip() if user_name.strip() else "Anonymous Aspirant"
-            st.session_state.messages.append({"name": display_name, "text": user_msg})
-            st.rerun()
+    st.markdown("---")
+    st.subheader("📁 Saved Log Records (Persisted Across Reloads)")
+    
+    logs_df = load_logs()
+    if not logs_df.empty:
+        st.dataframe(logs_df, use_container_width=True)
+    else:
+        st.info("No saved logs in the SQLite database yet. Fill out the form above to add an entry.")
