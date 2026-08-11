@@ -1,7 +1,4 @@
 streamlit
-streamlit-webrtc
-opencv-python-headless
-numpy
-scipy
 pandas
+plotly
 pillow
