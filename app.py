@@ -6,7 +6,6 @@ import sqlite3
 import pandas as pd
 from scipy.signal import find_peaks
 from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
-from deepface import DeepFace
 
 # ---------------------------------------------------------
 # 1. PAGE CONFIG & CUSTOM CSS
@@ -87,7 +86,7 @@ with col_title:
 st.sidebar.title("📌 Navigation")
 module = st.sidebar.radio("Select Module:", [
     "❤️ Real PPG Optical Heart Rate Monitor",
-    "📷 Real OpenCV & DeepFace Emotion Detector",
+    "📷 Real OpenCV Face Detection",
     "🌸 Menstrual & Ovulation Predictor",
     "📊 Persistent Health & Symptom Log (SQLite)"
 ])
@@ -97,37 +96,31 @@ module = st.sidebar.radio("Select Module:", [
 # ---------------------------------------------------------
 if module == "❤️ Real PPG Optical Heart Rate Monitor":
     st.header("❤️ Real Optical PPG Heart Rate Processing")
-    st.write("Place your index finger **lightly over your camera lens** (with flash/lighting enabled if possible). The algorithm processes green channel mean intensity changes frame-by-frame to extract blood pulse peaks.")
+    st.write("Place your index finger **lightly over your camera lens** (with flashlight enabled if on mobile). The algorithm processes green channel mean intensity changes frame-by-frame to extract blood pulse peaks.")
 
     class PPGTransformer(VideoTransformerBase):
         def __init__(self):
             self.green_means = []
             self.bpm = 0.0
-            self.fps = 30  # Standard frame sampling frequency
+            self.fps = 30
 
         def transform(self, frame):
             img = frame.to_ndarray(format="bgr24")
             
-            # Extract green channel intensity across the center region
             h, w, _ = img.shape
             roi = img[int(h*0.3):int(h*0.7), int(w*0.3):int(w*0.7)]
             mean_green = np.mean(roi[:, :, 1])
             
             self.green_means.append(mean_green)
             
-            # Keep a rolling buffer of 150 frames (~5 seconds at 30 FPS)
             if len(self.green_means) > 150:
                 self.green_means.pop(0)
 
-            # Signal processing when buffer is ready
             if len(self.green_means) >= 90:
                 signal = np.array(self.green_means)
-                
-                # Detrend and normalize signal
                 signal = signal - np.mean(signal)
                 
-                # Peak detection with distance corresponding to 40-180 BPM range
-                min_distance = int(self.fps * 60 / 180)  # ~10 frames
+                min_distance = int(self.fps * 60 / 180)
                 peaks, _ = find_peaks(signal, distance=min_distance, prominence=0.5)
 
                 if len(peaks) > 1:
@@ -138,7 +131,6 @@ if module == "❤️ Real PPG Optical Heart Rate Monitor":
                         if 40 <= calculated_bpm <= 180:
                             self.bpm = round(calculated_bpm, 1)
 
-            # Overlay real-time BPM text on the video stream
             display_text = f"BPM: {self.bpm if self.bpm > 0 else 'Calculating...'}"
             cv2.putText(img, display_text, (30, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3)
             
@@ -153,13 +145,13 @@ if module == "❤️ Real PPG Optical Heart Rate Monitor":
     st.info("🔬 **Engineering Mechanism:** Photoplethysmography measures light absorption variations caused by blood volume changes during cardiac cycles. Peak distances ($\Delta t$) determine pulse frequency ($60 / \Delta t$).")
 
 # ---------------------------------------------------------
-# MODULE 2: REAL OPENCV + DEEPFACE EMOTION DETECTOR
+# MODULE 2: REAL OPENCV FACE DETECTION
 # ---------------------------------------------------------
-elif module == "📷 Real OpenCV & DeepFace Emotion Detector":
-    st.header("📷 Real-Time Deep Face Emotion Recognition")
-    st.write("Click **Start** below to stream your camera feed. DeepFace processes real facial geometry to classify expressions.")
+elif module == "📷 Real OpenCV Face Detection":
+    st.header("📷 Real-Time OpenCV Face Detection")
+    st.write("Click **Start** below to stream your camera feed. OpenCV Haar Cascade runs frame-by-frame face localization.")
 
-    class EmotionTransformer(VideoTransformerBase):
+    class FaceTransformer(VideoTransformerBase):
         def __init__(self):
             self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 
@@ -169,22 +161,15 @@ elif module == "📷 Real OpenCV & DeepFace Emotion Detector":
             faces = self.face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
 
             for (x, y, w, h) in faces:
-                face_roi = img[y:y+h, x:x+w]
-                try:
-                    analysis = DeepFace.analyze(face_roi, actions=['emotion'], enforce_detection=False)
-                    dominant_emotion = analysis[0]['dominant_emotion']
-
-                    cv2.rectangle(img, (x, y), (x+w, y+h), (0, 255, 0), 2)
-                    cv2.putText(img, f"Mood: {dominant_emotion.capitalize()}", (x, y - 10),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-                except Exception:
-                    pass
+                cv2.rectangle(img, (x, y), (x+w, y+h), (0, 255, 0), 2)
+                cv2.putText(img, "Face Detected", (x, y - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
 
             return img
 
     webrtc_streamer(
-        key="emotion-detection",
-        video_transformer_factory=EmotionTransformer,
+        key="face-detection",
+        video_transformer_factory=FaceTransformer,
         rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
     )
 
