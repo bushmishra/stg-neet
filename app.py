@@ -9,7 +9,7 @@ import plotly.express as px
 # 1. PAGE CONFIGURATION & DARK GLASSMORPHISM STYLING
 # ---------------------------------------------------------
 st.set_page_config(
-    page_title="VitalTrack AI | IITM BS",
+    page_title="VitalTrack Health | IITM BS",
     page_icon="🌸",
     layout="wide",
     initial_sidebar_state="collapsed"
@@ -51,11 +51,19 @@ st.markdown("""
         border-radius: 0 12px 12px 0;
         margin: 15px 0;
     }
+    .overdue-banner {
+        background: rgba(153, 27, 27, 0.4);
+        border: 1px solid #ef4444;
+        border-left: 6px solid #f87171;
+        padding: 16px 20px;
+        border-radius: 12px;
+        margin: 15px 0;
+    }
     </style>
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 2. SQLITE DATABASE ENGINE (ACCOUNTS & DATA PERSISTENCE)
+# 2. SQLITE DATABASE ENGINE
 # ---------------------------------------------------------
 def hash_password(password):
     return hashlib.sha256(str.encode(password)).hexdigest()
@@ -66,14 +74,12 @@ def get_db_connection():
 def init_db():
     conn = get_db_connection()
     c = conn.cursor()
-    # Users table
     c.execute("""
         CREATE TABLE IF NOT EXISTS users (
             username TEXT PRIMARY KEY,
             password TEXT
         )
     """)
-    # Cycle settings table
     c.execute("""
         CREATE TABLE IF NOT EXISTS user_cycles (
             username TEXT PRIMARY KEY,
@@ -82,7 +88,6 @@ def init_db():
             period_duration INTEGER
         )
     """)
-    # Scheduled exams table
     c.execute("""
         CREATE TABLE IF NOT EXISTS user_exams (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -91,7 +96,6 @@ def init_db():
             exam_date DATE
         )
     """)
-    # Daily symptom logs table
     c.execute("""
         CREATE TABLE IF NOT EXISTS user_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -109,14 +113,13 @@ def init_db():
 
 init_db()
 
-# Session State Initializations
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 if "username" not in st.session_state:
     st.session_state.username = ""
 
 # ---------------------------------------------------------
-# 3. BRANDED HEADER
+# 3. BRANDED HEADER (REMOVED AI TITLE)
 # ---------------------------------------------------------
 col_logo, col_title = st.columns([1, 6])
 with col_logo:
@@ -124,7 +127,7 @@ with col_logo:
 with col_title:
     st.markdown("""
         <div class="main-header">
-            <h1 style="margin:0; font-size: 2rem; color: #ffffff;">🌸 VitalTrack AI: Student Cycle & Exam Portal</h1>
+            <h1 style="margin:0; font-size: 2rem; color: #ffffff;">🌸 VitalTrack: Student Cycle & Health Portal</h1>
             <p style="margin:4px 0 0 0; color: #cbd5e1;">
                 Designed & Developed by <span class="badge">Sudhanshu Mishra</span> | <b>IIT Madras BS (Diploma Level)</b>
             </p>
@@ -132,7 +135,7 @@ with col_title:
     """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 4. LOGIN & ACCOUNT CREATION SECTION
+# 4. LOGIN / REGISTER SECTION
 # ---------------------------------------------------------
 if not st.session_state.logged_in:
     st.subheader("🔐 Student Portal Access")
@@ -172,7 +175,6 @@ if not st.session_state.logged_in:
                     try:
                         c.execute("INSERT INTO users (username, password) VALUES (?, ?)",
                                   (new_user.strip(), hash_password(new_pass)))
-                        # Initialize default cycle settings for user
                         default_date = datetime.date.today() - datetime.timedelta(days=12)
                         c.execute("INSERT INTO user_cycles (username, last_period_date, cycle_length, period_duration) VALUES (?, ?, ?, ?)",
                                   (new_user.strip(), default_date, 28, 5))
@@ -188,7 +190,7 @@ if not st.session_state.logged_in:
     st.stop()
 
 # ---------------------------------------------------------
-# 5. LOGGED-IN STUDENT DASHBOARD
+# 5. LOGGED-IN DASHBOARD
 # ---------------------------------------------------------
 user = st.session_state.username
 
@@ -203,7 +205,7 @@ with col_logout:
 
 st.divider()
 
-# Load User Cycle Settings from Database
+# Fetch User Settings
 conn = get_db_connection()
 c = conn.cursor()
 c.execute("SELECT last_period_date, cycle_length, period_duration FROM user_cycles WHERE username = ?", (user,))
@@ -219,8 +221,7 @@ else:
     db_cycle_length = 28
     db_period_duration = 5
 
-# --- SECTION 1: CYCLE PARAMETERS ---
-st.subheader("🌸 1. Cycle Settings & Phase Engine")
+st.subheader("🌸 1. Cycle Settings & Dynamic Phase Engine")
 
 c1, c2, c3 = st.columns(3)
 with c1:
@@ -230,7 +231,7 @@ with c2:
 with c3:
     period_duration = st.number_input("Period Duration (Days):", min_value=2, max_value=10, value=int(db_period_duration), key="period_dur_in")
 
-# Auto-save cycle updates to database on change
+# Auto-update database on parameter change
 if (last_period_date != db_last_date) or (cycle_length != db_cycle_length) or (period_duration != db_period_duration):
     conn = get_db_connection()
     c = conn.cursor()
@@ -245,68 +246,85 @@ if (last_period_date != db_last_date) or (cycle_length != db_cycle_length) or (p
     conn.commit()
     conn.close()
 
-# Dynamic Cycle Calculations
+# Dynamic Cycle Logic
 today = datetime.date.today()
-days_since_start = (today - last_period_date).days
-next_period = last_period_date + datetime.timedelta(days=int(cycle_length))
-ovulation_day = next_period - datetime.timedelta(days=14)
+expected_next_period = last_period_date + datetime.timedelta(days=int(cycle_length))
+days_overdue = (today - expected_next_period).days
+
+# Determine projected cycle iteration
+projected_period = expected_next_period
+while projected_period < today:
+    projected_period += datetime.timedelta(days=int(cycle_length))
+
+ovulation_day = projected_period - datetime.timedelta(days=14)
 fertile_start = ovulation_day - datetime.timedelta(days=5)
 fertile_end = ovulation_day + datetime.timedelta(days=1)
 
-if days_since_start < period_duration:
-    current_phase = "Menstrual Phase 🩸"
-    phase_desc = "Estrogen & progesterone levels are low. Focus on rest, hydration, and iron intake."
-elif today < ovulation_day - datetime.timedelta(days=2):
-    current_phase = "Follicular Phase 🌿"
-    phase_desc = "Estrogen rising. High energy, sharp memory retention, and strong mental clarity."
-elif today <= fertile_end:
-    current_phase = "Ovulatory Phase ⚡"
-    phase_desc = "LH surge occurs. Peak energy, highest alertness, and stamina."
-else:
-    current_phase = "Luteal Phase 🌙"
-    phase_desc = "Progesterone rises then drops. Energy may decline; PMS, cravings, or fatigue can occur."
-
-# Render Cycle Cards
-m1, m2, m3, m4 = st.columns(4)
-with m1:
+# Overdue Guidance Banner
+if days_overdue > 0:
     st.markdown(f"""
-        <div class="metric-card">
-            <h4 style="color: #f472b6; margin:0;">Next Period Starts</h4>
-            <h2 style="margin:5px 0;">{next_period.strftime('%d %b %Y')}</h2>
-            <p style="color:#94a3b8; margin:0;">({(next_period - today).days} days away)</p>
+        <div class="overdue-banner">
+            <h3 style="margin:0; color:#f87171;">💙 Do Not Panic: Period Overdue by {days_overdue} Day(s)</h3>
+            <p style="margin:8px 0 0 0; color:#f1f5f9; font-size: 0.95rem;">
+                Your expected start date was <b>{expected_next_period.strftime('%d %b %Y')}</b>. Menstrual cycles naturally vary due to routine shifts, exam stress, dietary changes, or sleep disruptions.
+            </p>
+            <hr style="border-color: rgba(255,255,255,0.2); margin: 10px 0;">
+            <p style="margin:0; color:#cbd5e1; font-size: 0.88rem;">
+                <b>What to do next:</b><br>
+                1. 🧘 <b>Manage Stress:</b> High cortisol from exams/prep delays ovulation.<br>
+                2. 💧 <b>Hydrate & Rest:</b> Ensure 7-8 hours of sleep and adequate nutrition.<br>
+                3. 🩺 <b>Medical Guidance:</b> If your period is delayed by more than 14-21 days or if you experience severe pain, consult a healthcare professional.
+            </p>
         </div>
     """, unsafe_allow_html=True)
+
+# Metrics Cards Display
+m1, m2, m3, m4 = st.columns(4)
+with m1:
+    if days_overdue > 0:
+        st.markdown(f"""
+            <div class="metric-card">
+                <h4 style="color: #f87171; margin:0;">Expected Date Was</h4>
+                <h2 style="margin:5px 0;">{expected_next_period.strftime('%d %b %Y')}</h2>
+                <p style="color:#f87171; margin:0;">({days_overdue} days overdue)</p>
+            </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.markdown(f"""
+            <div class="metric-card">
+                <h4 style="color: #f472b6; margin:0;">Next Period Starts</h4>
+                <h2 style="margin:5px 0;">{expected_next_period.strftime('%d %b %Y')}</h2>
+                <p style="color:#94a3b8; margin:0;">({(expected_next_period - today).days} days away)</p>
+            </div>
+        """, unsafe_allow_html=True)
+
 with m2:
     st.markdown(f"""
         <div class="metric-card">
-            <h4 style="color: #fbbf24; margin:0;">Predicted Ovulation</h4>
+            <h4 style="color: #fbbf24; margin:0;">Projected Ovulation</h4>
             <h2 style="margin:5px 0;">{ovulation_day.strftime('%d %b %Y')}</h2>
-            <p style="color:#94a3b8; margin:0;">Peak Fertility Date</p>
+            <p style="color:#94a3b8; margin:0;">Next Projected Cycle</p>
         </div>
     """, unsafe_allow_html=True)
+
 with m3:
     st.markdown(f"""
         <div class="metric-card">
             <h4 style="color: #34d399; margin:0;">Fertile Window</h4>
             <h3 style="margin:5px 0;">{fertile_start.strftime('%d %b')} - {fertile_end.strftime('%d %b')}</h3>
-            <p style="color:#94a3b8; margin:0;">6-Day Window</p>
-        </div>
-    """, unsafe_allow_html=True)
-with m4:
-    st.markdown(f"""
-        <div class="metric-card">
-            <h4 style="color: #38bdf8; margin:0;">Current Phase</h4>
-            <h2 style="margin:5px 0;">{current_phase.split()[0]}</h2>
-            <p style="color:#94a3b8; margin:0;">Day {days_since_start + 1} of Cycle</p>
+            <p style="color:#94a3b8; margin:0;">Projected Window</p>
         </div>
     """, unsafe_allow_html=True)
 
-st.markdown(f"""
-    <div class="phase-card">
-        <h3 style="margin:0; color:#ec4899;">Active Phase: {current_phase}</h3>
-        <p style="margin:5px 0 0 0; color:#cbd5e1;">{phase_desc}</p>
-    </div>
-""", unsafe_allow_html=True)
+with m4:
+    days_since_start = (today - last_period_date).days
+    st.markdown(f"""
+        <div class="metric-card">
+            <h4 style="color: #38bdf8; margin:0;">Elapsed Time</h4>
+            <h2 style="margin:5px 0;">Day {days_since_start + 1}</h2>
+            <p style="color:#94a3b8; margin:0;">Since Last Period</p>
+        </div>
+    """, unsafe_allow_html=True)
 
 st.divider()
 
@@ -331,7 +349,6 @@ with col_ex3:
             conn.close()
             st.rerun()
 
-# Load User Exams from Database
 conn = get_db_connection()
 exams_df = pd.read_sql_query("SELECT id, exam_name, exam_date FROM user_exams WHERE username = ? ORDER BY exam_date ASC", conn, params=(user,))
 conn.close()
@@ -400,7 +417,6 @@ if st.button("Save Daily Log Record"):
     st.success("Entry saved permanently to your ID!")
     st.rerun()
 
-# Load User Logs from Database
 conn = get_db_connection()
 logs_df = pd.read_sql_query("SELECT log_date, flow, cramps, mood, energy, symptoms FROM user_logs WHERE username = ? ORDER BY log_date ASC", conn, params=(user,))
 conn.close()
