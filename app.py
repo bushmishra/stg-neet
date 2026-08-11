@@ -1,98 +1,204 @@
 import streamlit as st
-import py3Dmol
-from stmol import showmol
-from rdkit import Chem
-from rdkit.Chem import AllChem
+import streamlit.components.v1 as components
 
 # Page Configuration
-st.set_page_config(page_title="NEET 3D Visualizer", layout="wide")
+st.set_page_config(page_title="NEET 3D | IIT Madras BS", layout="wide")
 
-st.title("NEET 3D Learning Platform")
-st.caption("Interactive 3D Visualizations for Physics, Chemistry, and Biology")
+# Custom Header with IIT Madras Logo & Student Details
+col1, col2 = st.columns([1, 5])
+with col1:
+    # Official IIT Madras Logo
+    st.image("https://upload.wikimedia.org/wikipedia/en/6/69/IIT_Madras_Logo.svg", width=110)
+with col2:
+    st.title("NEET 3D Interactive Learning Platform")
+    st.markdown("**Created by:** Sudhanshu Mishra | *IITM BS (Diploma Level)*")
 
-# Subject Selector
-subject = st.sidebar.selectbox("Select Subject", ["Chemistry", "Biology", "Physics"])
+st.divider()
+
+# Subject Selector Sidebar
+subject = st.sidebar.radio("Select Subject", ["Biology (Chapter-Wise)", "Chemistry (Resonance & Labeling)", "Physics (3D Mechanics)"])
 
 # ---------------------------------------------------------
-# 1. CHEMISTRY MODULE
+# 1. BIOLOGY MODULE (Chapter-Wise 3D with Spatial Labels)
 # ---------------------------------------------------------
-if subject == "Chemistry":
-    st.header("Chemistry: 3D Molecular Visualizer")
-    molecule_choice = st.selectbox(
-        "Choose a Molecule:",
-        ["Aspirin", "Ethanol", "Benzene", "Glucose"]
+if subject == "Biology (Chapter-Wise)":
+    st.header("🧬 Biology: Chapter-Wise 3D Models with Spatial Labels")
+    
+    chapter = st.selectbox(
+        "Select NCERT Chapter:",
+        [
+            "Molecular Basis of Inheritance (DNA Double Helix)",
+            "Cell: The Unit of Life (Cell Membrane & Transport)",
+            "Human Physiology (Hemoglobin / Oxygen Transport)",
+            "Biomolecules (Insulin Structure)"
+        ]
     )
-    smiles_dict = {
-        "Aspirin": "CC(=O)OC1=CC=CC=C1C(=O)O",
-        "Ethanol": "CCO",
-        "Benzene": "c1ccccc1",
-        "Glucose": "C(C1C(C(C(C(O1)O)O)O)O)O"
+
+    bio_data = {
+        "Molecular Basis of Inheritance (DNA Double Helix)": {
+            "pdb": "1bna",
+            "info": "**Key Features Labeled:** Sugar-Phosphate Backbone, Hydrogen-bonded Nitrogenous Base Pairs (A=T, G≡C), Major and Minor Grooves.",
+            "labels": [
+                {"text": "Sugar-Phosphate Backbone", "pos": [0, 10, 0]},
+                {"text": "Hydrogen-bonded Base Pairs", "pos": [0, 0, 0]},
+                {"text": "Major Groove", "pos": [0, -10, 0]}
+            ]
+        },
+        "Cell: The Unit of Life (Cell Membrane & Transport)": {
+            "pdb": "1afo",
+            "info": "**Key Features Labeled:** Glycophorin A Transmembrane Helices, Lipid Bilayer Boundary.",
+            "labels": [
+                {"text": "Transmembrane Alpha Helix", "pos": [0, 0, 0]},
+                {"text": "Hydrophobic Core Region", "pos": [0, 8, 0]}
+            ]
+        },
+        "Human Physiology (Hemoglobin / Oxygen Transport)": {
+            "pdb": "1a3n",
+            "info": "**Key Features Labeled:** Quaternary Tetramer (2 Alpha + 2 Beta Chains), Central Heme Groups for Oxygen Binding.",
+            "labels": [
+                {"text": "Alpha Subunit", "pos": [15, 15, 15]},
+                {"text": "Beta Subunit", "pos": [-15, -15, -15]},
+                {"text": "Heme Binding Site", "pos": [0, 0, 0]}
+            ]
+        },
+        "Biomolecules (Insulin Structure)": {
+            "pdb": "1trz",
+            "info": "**Key Features Labeled:** A-Chain, B-Chain, Interchain Disulfide Bonds.",
+            "labels": [
+                {"text": "A-Chain Peptide", "pos": [10, 5, 0]},
+                {"text": "B-Chain Peptide", "pos": [-10, -5, 0]},
+                {"text": "Disulfide Linkage", "pos": [0, 0, 0]}
+            ]
+        }
     }
-    user_smiles = smiles_dict[molecule_choice]
 
-    if st.button("Render 3D Molecule"):
-        mol = Chem.MolFromSmiles(user_smiles)
-        mol = Chem.AddHs(mol)
-        AllChem.EmbedMolecule(mol)
-        AllChem.MMFFOptimizeMolecule(mol)
-        mblock = Chem.MolToMolBlock(mol)
+    selected_bio = bio_data[chapter]
+    st.markdown(selected_bio["info"])
 
-        view = py3Dmol.view(width=600, height=400)
-        view.addModel(mblock, 'mol')
-        view.setStyle({'stick': {}, 'sphere': {'scale': 0.25}})
-        view.zoomTo()
-        showmol(view, height=400, width=600)
+    # Convert label data into JS string
+    label_js = ""
+    for l in selected_bio["labels"]:
+        txt = l["text"]
+        x, y, z = l["pos"]
+        label_js += f"viewer.addLabel('{txt}', {{fontColor: 'white', backgroundColor: 'black', fontSize: 12}}, {{x: {x}, y: {y}, z: {z}}});\n"
+
+    # 3Dmol.js Renderer
+    html_code = f"""
+    <script src="https://3Dmol.org/build/3Dmol-min.js"></script>
+    <div id="bio_container" style="width: 100%; height: 500px; border: 1px solid #ddd; border-radius: 8px;"></div>
+    <script>
+        let viewer = $3Dmol.createViewer(document.getElementById('bio_container'), {{backgroundColor: '#f8f9fa'}});
+        $3Dmol.download('pdb:{selected_bio["pdb"]}', viewer, {{}}, function() {{
+            viewer.setStyle({{}}, {{cartoon: {{color: 'spectrum'}}}});
+            {label_js}
+            viewer.render();
+            viewer.zoomTo();
+        }});
+    </script>
+    """
+    components.html(html_code, height=520)
 
 # ---------------------------------------------------------
-# 2. BIOLOGY MODULE
+# 2. CHEMISTRY MODULE (Resonance Structures & Annotation)
 # ---------------------------------------------------------
-elif subject == "Biology":
-    st.header("Biology: 3D Structure Viewer")
-    bio_choice = st.selectbox(
-        "Select Biological Structure:",
-        ["DNA Double Helix (1BNA)", "Hemoglobin (1A3N)", "Insulin (1TRZ)"]
+elif subject == "Chemistry (Resonance & Labeling)":
+    st.header("🧪 Chemistry: Resonance Structures & Electronic Delocalization")
+    
+    chem_choice = st.selectbox(
+        "Select Molecule / Ion for Resonance Analysis:",
+        ["Benzene (Aromatic Ring Delocalization)", "Aniline (+R / +M Effect)", "Phenol (Resonance Stabilization)"]
     )
-    pdb_ids = {
-        "DNA Double Helix (1BNA)": "1bna",
-        "Hemoglobin (1A3N)": "1a3n",
-        "Insulin (1TRZ)": "1trz"
+
+    chem_data = {
+        "Benzene (Aromatic Ring Delocalization)": {
+            "cid": 241,
+            "desc": "**Resonance Concept:** Equal C-C bond lengths due to delocalized π-electrons forming a continuous ring above and below the planar ring.",
+            "labels": [
+                {"text": "Delocalized π-Cloud Carbon Ring", "pos": [0, 0, 0]},
+                {"text": "sp2 Hybridized Carbon", "pos": [1.4, 0, 0]}
+            ]
+        },
+        "Aniline (+R / +M Effect)": {
+            "cid": 6800,
+            "desc": "**Resonance Concept:** Lone pair on nitrogen (-NH2) delocalizes into the benzene ring, increasing electron density at Ortho and Para positions.",
+            "labels": [
+                {"text": "-NH2 Donor Group (Lone Pair)", "pos": [0, 2.2, 0]},
+                {"text": "Ortho Position (High e- density)", "pos": [1.2, 0.7, 0]},
+                {"text": "Para Position (High e- density)", "pos": [0, -2.2, 0]}
+            ]
+        },
+        "Phenol (Resonance Stabilization)": {
+            "cid": 996,
+            "desc": "**Resonance Concept:** Oxygen lone pair delocalization stabilizes the phenoxide ion, making phenol acidic in nature.",
+            "labels": [
+                {"text": "-OH Group", "pos": [0, 2.1, 0]},
+                {"text": "Aromatic Ring System", "pos": [0, -0.5, 0]}
+            ]
+        }
     }
-    selected_pdb = pdb_ids[bio_choice]
 
-    if st.button("Fetch and Render 3D Structure"):
-        view = py3Dmol.view(query=f'pdb:{selected_pdb}', width=600, height=400)
-        view.setStyle({'cartoon': {'color': 'spectrum'}})
-        view.addSurface(py3Dmol.VDW, {'opacity': 0.4, 'color': 'white'})
-        view.zoomTo()
-        showmol(view, height=400, width=600)
+    selected_chem = chem_data[chem_choice]
+    st.markdown(selected_chem["desc"])
+
+    chem_label_js = ""
+    for l in selected_chem["labels"]:
+        txt = l["text"]
+        x, y, z = l["pos"]
+        chem_label_js += f"viewer.addLabel('{txt}', {{fontColor: 'yellow', backgroundColor: '#333333', fontSize: 11}}, {{x: {x}, y: {y}, z: {z}}});\n"
+
+    html_code = f"""
+    <script src="https://3Dmol.org/build/3Dmol-min.js"></script>
+    <div id="chem_container" style="width: 100%; height: 500px; border: 1px solid #ddd; border-radius: 8px;"></div>
+    <script>
+        let viewer = $3Dmol.createViewer(document.getElementById('chem_container'), {{backgroundColor: '#1e1e1e'}});
+        $3Dmol.download('cid:{selected_chem["cid"]}', viewer, {{}}, function() {{
+            viewer.setStyle({{}}, {{stick: {{colorscheme: 'Jmol'}}, sphere: {{scale: 0.25}}}});
+            {chem_label_js}
+            viewer.render();
+            viewer.zoomTo();
+        }});
+    </script>
+    """
+    components.html(html_code, height=520)
 
 # ---------------------------------------------------------
-# 3. PHYSICS MODULE
+# 3. PHYSICS MODULE (3D Mechanics Vector Motion)
 # ---------------------------------------------------------
-elif subject == "Physics":
-    st.header("Physics: Interactive 3D Vectors")
-    v_x = st.slider("Velocity X component", -10.0, 10.0, 5.0)
-    v_y = st.slider("Velocity Y component", -10.0, 10.0, 5.0)
-    v_z = st.slider("Velocity Z component", -10.0, 10.0, 2.0)
+elif subject == "Physics (3D Mechanics)":
+    st.header("⚡ Physics: 3D Vector Motions & Mechanics")
+    st.write("Adjust magnitude components to visualize the resultant 3D force/velocity vector in spatial coordinates.")
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        v_x = st.slider("Vector X-Component (i)", -10.0, 10.0, 6.0)
+    with c2:
+        v_y = st.slider("Vector Y-Component (j)", -10.0, 10.0, 8.0)
+    with c3:
+        v_z = st.slider("Vector Z-Component (k)", -10.0, 10.0, 4.0)
 
     html_code = f"""
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <div id="container" style="width: 100%; height: 400px;"></div>
+    <div id="phys_container" style="width: 100%; height: 500px; border: 1px solid #ddd; border-radius: 8px;"></div>
     <script>
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0xf0f2f6);
-        const camera = new THREE.PerspectiveCamera(75, 600/400, 0.1, 1000);
-        const renderer = new THREE.WebGLRenderer();
-        renderer.setSize(600, 400);
-        document.getElementById('container').appendChild(renderer.domElement);
+        scene.background = new THREE.Color(0x0f172a);
 
+        const camera = new THREE.PerspectiveCamera(75, 600/500, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer();
+        renderer.setSize(document.getElementById('phys_container').clientWidth, 500);
+        document.getElementById('phys_container').appendChild(renderer.domElement);
+
+        // Grid and Axes
+        const gridHelper = new THREE.GridHelper(20, 20, 0x475569, 0x334155);
+        scene.add(gridHelper);
         const axesHelper = new THREE.AxesHelper(10);
         scene.add(axesHelper);
 
+        // Vector Arrow
         const dir = new THREE.Vector3({v_x}, {v_y}, {v_z}).normalize();
         const origin = new THREE.Vector3(0, 0, 0);
         const length = Math.sqrt({v_x}*{v_x} + {v_y}*{v_y} + {v_z}*{v_z});
-        const arrowHelper = new THREE.ArrowHelper(dir, origin, length, 0xff0000);
+        const arrowHelper = new THREE.ArrowHelper(dir, origin, length, 0x38bdf8, 1.5, 0.8);
         scene.add(arrowHelper);
 
         camera.position.set(12, 12, 12);
@@ -105,4 +211,4 @@ elif subject == "Physics":
         animate();
     </script>
     """
-    st.components.v1.html(html_code, height=420)
+    components.html(html_code, height=520)
